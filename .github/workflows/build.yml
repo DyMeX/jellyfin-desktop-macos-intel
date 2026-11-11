@@ -12,6 +12,10 @@ on:
         description: "Rebuild even if a release for this tag already exists"
         type: boolean
         default: false
+      publish:
+        description: "Publish the DMG as a release (off = build artifact only)"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -80,6 +84,7 @@ jobs:
           path: dist/*
 
       - name: Publish release
+        if: github.event_name == 'schedule' || inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
           PRE: ${{ needs.check.outputs.prerelease }}
