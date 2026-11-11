@@ -182,7 +182,7 @@ log "verify bundle"
 log "sign (ad-hoc) and package"
 codesign --force --deep -s - "$APP"
 VER="${JELLYFIN_TAG#v}"
-DMG="$DIST/JellyfinDesktop-$VER-macos-x86_64.dmg"
+DMG="$DIST/jellyfin-desktop-$JELLYFIN_TAG-macos-x86_64.dmg"   # same naming scheme as the upstream release assets
 STAGE="$WORK/dmg"
 rm -rf "$STAGE" "$DMG"
 mkdir -p "$STAGE"
