@@ -1,0 +1,108 @@
+name: build
+
+on:
+  schedule:
+    - cron: "17 5 * * *"   # daily: build when upstream publishes a new release
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Upstream tag to build (empty = latest upstream release)"
+        required: false
+      force:
+        description: "Rebuild even if a release for this tag already exists"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+      prerelease: ${{ steps.pick.outputs.prerelease }}
+      build: ${{ steps.pick.outputs.build }}
+    steps:
+      - id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_TAG:-}" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag=$(gh api repos/jellyfin/jellyfin-desktop/releases --jq '[.[] | select(.draft | not)][0].tag_name')
+          fi
+          pre=$(gh api "repos/jellyfin/jellyfin-desktop/releases/tags/$tag" --jq '.prerelease' 2>/dev/null || echo true)
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && [ "${FORCE:-false}" != "true" ]; then
+            build=false
+          else
+            build=true
+          fi
+          echo "tag=$tag prerelease=$pre build=$build"
+          { echo "tag=$tag"; echo "prerelease=$pre"; echo "build=$build"; } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: macos-15-intel
+    timeout-minutes: 300
+    env:
+      JELLYFIN_TAG: ${{ needs.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build tools
+        run: brew install nasm ninja pkgconf || true
+
+      - name: Cache dependencies and Qt
+        uses: actions/cache@v4
+        with:
+          path: |
+            work/prefix
+            work/qt
+            work/venv
+          key: deps-${{ runner.os }}-${{ hashFiles('versions.env', 'build.sh', 'patches/mpv/**') }}
+
+      - name: Build
+        run: ./build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jellyfin-desktop-${{ needs.check.outputs.tag }}-macos-x86_64
+          path: dist/*
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRE: ${{ needs.check.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          tag="$JELLYFIN_TAG"
+          . ./versions.env
+          sha=$(cut -d' ' -f1 dist/*.sha256)
+          cat > notes.md <<EOF
+          Unofficial Intel (x86_64) build of [Jellyfin Desktop ${tag}](https://github.com/jellyfin/jellyfin-desktop/releases/tag/${tag}), unchanged source.
+
+          - Requires an Intel Mac with macOS ${MACOS_MIN} or newer.
+          - Not notarized: on first launch right-click the app and choose **Open**, or run \`xattr -dr com.apple.quarantine "/Applications/Jellyfin Desktop.app"\`.
+          - Built from source on GitHub Actions: Qt ${QT_VERSION}, mpv ${MPV_TAG}, FFmpeg ${FFMPEG_VERSION} (LGPL), libplacebo ${LIBPLACEBO_TAG}, libass ${LIBASS_TAG}, dav1d ${DAV1D_TAG}.
+          - Build log: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          SHA-256: \`${sha}\`
+          EOF
+          flags=()
+          [ "$PRE" = "true" ] && flags+=(--prerelease)
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+            gh release edit "$tag" --notes-file notes.md
+          else
+            gh release create "$tag" dist/* --title "Jellyfin Desktop ${tag#v} for Intel Macs" --notes-file notes.md ${flags[@]+"${flags[@]}"}
+          fi

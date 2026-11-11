@@ -1,0 +1,13 @@
+diff --git a/video/out/mac/view.swift b/video/out/mac/view.swift
+index f8cc625..0f5c18a 100644
+--- a/video/out/mac/view.swift
++++ b/video/out/mac/view.swift
+@@ -29,7 +29,7 @@ class View: NSView, CALayerDelegate {
+     override var acceptsFirstResponder: Bool { return true }
+ 
+     override var isOpaque: Bool {
+-        if let metalLayer = layer as? MetalLayer {
++        if let metalLayer = layer as? CAMetalLayer {
+             return !metalLayer.isOpaque
+         }
+ 
