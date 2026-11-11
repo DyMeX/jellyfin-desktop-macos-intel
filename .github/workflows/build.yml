@@ -100,6 +100,7 @@ jobs:
           - Not notarized: on first launch right-click the app and choose **Open**, or run \`xattr -dr com.apple.quarantine "/Applications/Jellyfin Desktop.app"\`.
           - Built from source on GitHub Actions: Qt ${QT_VERSION}, mpv ${MPV_TAG}, FFmpeg ${FFMPEG_VERSION} (LGPL), libplacebo ${LIBPLACEBO_TAG}, libass ${LIBASS_TAG}, dav1d ${DAV1D_TAG}.
           - Build log: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          - Status: automated build, playback not yet tested by hand.
 
           SHA-256: \`${sha}\`
           EOF

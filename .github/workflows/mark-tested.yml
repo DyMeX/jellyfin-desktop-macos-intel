@@ -1,0 +1,34 @@
+name: mark-tested
+
+# Run by hand after installing a release and checking that video plays.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag that was tested (e.g. v2.1.0)"
+        required: true
+      macos:
+        description: "macOS version it was tested on (e.g. 26.6)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  mark:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          MACOS: ${{ inputs.macos }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
+          line="- Status: playback tested on macOS ${MACOS} ($(date -u +%Y-%m-%d))."
+          if grep -q '^- Status: ' notes.md; then
+            awk -v l="$line" '/^- Status: /{print l; next} {print}' notes.md > new.md
+          else
+            { cat notes.md; echo; echo "$line"; } > new.md
+          fi
+          gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --notes-file new.md

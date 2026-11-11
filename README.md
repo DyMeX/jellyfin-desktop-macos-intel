@@ -52,6 +52,9 @@ x86_64, needs a macOS newer than 13 or links to a library outside the bundle.
 A [workflow](.github/workflows/build.yml) checks upstream daily and builds new releases on a
 `macos-15-intel` runner. Upstream pre-releases are published as pre-releases here too.
 
+Automated builds are checked for completeness but not played back. Each release note has a
+**Status** line; it changes to "playback tested on macOS ..." once the maintainer has tried the build.
+
 ### Build it yourself
 
 On an Intel Mac with Xcode Command Line Tools and Homebrew:
