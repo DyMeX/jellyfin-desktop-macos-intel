@@ -37,14 +37,20 @@ export LDFLAGS="-mmacosx-version-min=$MACOS_MIN -Wl,-headerpad_max_install_names
 
 log() { printf '\n==== %s\n' "$*"; }
 
-fetch() { # fetch <dir> <git url> <tag> [--recurse]
-  local dir="$SRC/$1"
+fetch() { # fetch <dir> <git url> <tag> [--recurse]; retries, because runners sometimes lose DNS for a moment
+  local dir="$SRC/$1" try
   [ -d "$dir" ] && return 0
-  if [ "${4:-}" = "--recurse" ]; then
-    git -c advice.detachedHead=false clone -q --depth 1 --branch "$3" --recurse-submodules --shallow-submodules "$2" "$dir"
-  else
-    git -c advice.detachedHead=false clone -q --depth 1 --branch "$3" "$2" "$dir"
-  fi
+  for try in 1 2 3 4; do
+    if [ "${4:-}" = "--recurse" ]; then
+      git -c advice.detachedHead=false clone -q --depth 1 --branch "$3" --recurse-submodules --shallow-submodules "$2" "$dir" && return 0
+    else
+      git -c advice.detachedHead=false clone -q --depth 1 --branch "$3" "$2" "$dir" && return 0
+    fi
+    rm -rf "$dir"
+    echo "clone of $2 failed (attempt $try), retrying" >&2
+    sleep $((try * 15))
+  done
+  return 1
 }
 
 done_flag() { [ -f "$PREFIX/.done-$1" ]; }
@@ -103,7 +109,7 @@ if ! done_flag ffmpeg; then
   log "ffmpeg $FFMPEG_VERSION (LGPL, VideoToolbox, Secure Transport for https)"
   if [ ! -d "$SRC/ffmpeg" ]; then
     mkdir -p "$SRC/ffmpeg"
-    curl -fsSL "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz" | tar xJ -C "$SRC/ffmpeg" --strip-components 1
+    curl -fsSL --retry 4 --retry-delay 15 --retry-all-errors "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz" | tar xJ -C "$SRC/ffmpeg" --strip-components 1
   fi
   (cd "$SRC/ffmpeg" && ./configure --prefix="$PREFIX" --enable-shared --disable-static \
       --disable-programs --disable-doc --disable-debug --disable-autodetect \
