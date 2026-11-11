@@ -79,6 +79,7 @@ jobs:
         run: ./build.sh
 
       - uses: actions/upload-artifact@v4
+        continue-on-error: true   # the release below is what matters; artifact storage outages should not fail the build
         with:
           name: jellyfin-desktop-${{ needs.check.outputs.tag }}-macos-x86_64
           path: dist/*
