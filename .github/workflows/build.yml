@@ -30,7 +30,6 @@ jobs:
     outputs:
       tag: ${{ steps.pick.outputs.tag }}
       prerelease: ${{ steps.pick.outputs.prerelease }}
-      title: ${{ steps.pick.outputs.title }}
       build: ${{ steps.pick.outputs.build }}
     steps:
       - id: pick
@@ -46,15 +45,13 @@ jobs:
             tag=$(gh api repos/jellyfin/jellyfin-desktop/releases --jq '[.[] | select(.draft | not)][0].tag_name')
           fi
           pre=$(gh api "repos/jellyfin/jellyfin-desktop/releases/tags/$tag" --jq '.prerelease' 2>/dev/null || echo true)
-          title=$(gh api "repos/jellyfin/jellyfin-desktop/releases/tags/$tag" --jq '.name // ""' 2>/dev/null || true)
-          [ -n "$title" ] || title="$tag"
           if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && [ "${FORCE:-false}" != "true" ]; then
             build=false
           else
             build=true
           fi
           echo "tag=$tag prerelease=$pre build=$build"
-          { echo "tag=$tag"; echo "prerelease=$pre"; echo "build=$build"; echo "title=$title"; } >> "$GITHUB_OUTPUT"
+          { echo "tag=$tag"; echo "prerelease=$pre"; echo "build=$build"; } >> "$GITHUB_OUTPUT"
 
   build:
     needs: check
@@ -92,7 +89,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PRE: ${{ needs.check.outputs.prerelease }}
-          TITLE: ${{ needs.check.outputs.title }}
         run: |
           set -euo pipefail
           tag="$JELLYFIN_TAG"
@@ -115,5 +111,5 @@ jobs:
             gh release upload "$tag" dist/* --clobber
             gh release edit "$tag" --notes-file notes.md
           else
-            gh release create "$tag" dist/* --title "$TITLE" --notes-file notes.md ${flags[@]+"${flags[@]}"}
+            gh release create "$tag" dist/* --title "Jellyfin Desktop ${tag#v} for Intel Macs" --notes-file notes.md ${flags[@]+"${flags[@]}"}
           fi
