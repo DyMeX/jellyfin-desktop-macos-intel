@@ -105,11 +105,13 @@ jobs:
 
           SHA-256: \`${sha}\`
           EOF
-          flags=()
-          [ "$PRE" = "true" ] && flags+=(--prerelease)
+          # Published as a regular release so the repository shows the newest build; the note says when upstream calls it a pre-release.
+          if [ "$PRE" = "true" ]; then
+            printf '\nUpstream marks %s as a pre-release.\n' "$tag" >> notes.md
+          fi
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" dist/* --clobber
             gh release edit "$tag" --notes-file notes.md
           else
-            gh release create "$tag" dist/* --title "Jellyfin Desktop ${tag#v} for Intel Macs" --notes-file notes.md ${flags[@]+"${flags[@]}"}
+            gh release create "$tag" dist/* --title "Jellyfin Desktop ${tag#v} for Intel Macs" --notes-file notes.md --latest
           fi
