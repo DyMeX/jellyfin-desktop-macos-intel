@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds an unofficial Jellyfin Desktop for Intel Macs (x86_64), macOS 13+.
+# Builds an unofficial Jellyfin Desktop for Intel Macs (x86_64), macOS 13+, on an Intel or Apple Silicon Mac.
 # All media libraries (ffmpeg, libmpv, libass, libplacebo, ...) are built from source
 # with MACOSX_DEPLOYMENT_TARGET=13.0, so nothing from Homebrew ends up in the app.
 #
@@ -21,10 +21,14 @@ DIST="$ROOT/dist"
 JOBS="$(sysctl -n hw.ncpu)"
 mkdir -p "$SRC" "$PREFIX" "$DIST"
 
-if [ "$(uname -m)" != "x86_64" ]; then
-  echo "error: run this on an Intel Mac (or a macos-*-intel runner)" >&2
-  exit 1
-fi
+# On an Intel Mac everything builds natively. On Apple Silicon (arm64) the same libraries are cross-compiled
+# for x86_64: meson gets a cross file, FFmpeg --enable-cross-compile, CMake CMAKE_OSX_ARCHITECTURES=x86_64.
+# Nothing here needs Rosetta; tools built and run during the build (meson native targets) stay arm64.
+case "$(uname -m)" in
+  x86_64) CROSS=0 ;;
+  arm64)  CROSS=1 ;;
+  *) echo "error: unsupported build machine $(uname -m)" >&2; exit 1 ;;
+esac
 
 export MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN"
 export PATH="$VENV/bin:$PATH"
@@ -36,6 +40,45 @@ export CXXFLAGS="$CFLAGS"
 export LDFLAGS="-mmacosx-version-min=$MACOS_MIN -Wl,-headerpad_max_install_names"
 
 log() { printf '\n==== %s\n' "$*"; }
+
+CROSS_FILE="$WORK/x86_64-darwin.ini"
+if [ "$CROSS" = 1 ]; then
+  # compiler flags for the x86_64 host live in the cross file; environment CFLAGS would also reach
+  # the build-machine (arm64) compiler that meson uses for native helper tools
+  q() { printf "'%s'" "$1"; }
+  cat > "$CROSS_FILE" <<EOF
+[binaries]
+c = ['clang', '-arch', 'x86_64']
+cpp = ['clang++', '-arch', 'x86_64']
+objc = ['clang', '-arch', 'x86_64']
+objcpp = ['clang++', '-arch', 'x86_64']
+ar = 'ar'
+strip = 'strip'
+pkg-config = 'pkg-config'
+
+[built-in options]
+c_args = ['-mmacosx-version-min=$MACOS_MIN', '-O2']
+cpp_args = ['-mmacosx-version-min=$MACOS_MIN', '-O2']
+objc_args = ['-mmacosx-version-min=$MACOS_MIN', '-O2']
+objcpp_args = ['-mmacosx-version-min=$MACOS_MIN', '-O2']
+c_link_args = ['-mmacosx-version-min=$MACOS_MIN', '-Wl,-headerpad_max_install_names']
+cpp_link_args = ['-mmacosx-version-min=$MACOS_MIN', '-Wl,-headerpad_max_install_names']
+objc_link_args = ['-mmacosx-version-min=$MACOS_MIN', '-Wl,-headerpad_max_install_names']
+objcpp_link_args = ['-mmacosx-version-min=$MACOS_MIN', '-Wl,-headerpad_max_install_names']
+
+[properties]
+pkg_config_libdir = [$(q "$PREFIX/lib/pkgconfig")]
+needs_exe_wrapper = true
+
+[host_machine]
+system = 'darwin'
+subsystem = 'macos'
+kernel = 'xnu'
+cpu_family = 'x86_64'
+cpu = 'x86_64'
+endian = 'little'
+EOF
+fi
 
 fetch() { # fetch <dir> <git url> <tag> [--recurse]; retries, because runners sometimes lose DNS for a moment
   local dir="$SRC/$1" try
@@ -60,12 +103,17 @@ meson_build() { # meson_build <name> [meson options...]
   local name="$1"; shift
   done_flag "$name" && return 0
   log "$name"
+  local cross=()
+  [ "$CROSS" = 1 ] && cross=(env -u CFLAGS -u CXXFLAGS -u LDFLAGS)
   (cd "$SRC/$name" && rm -rf _build \
-    && meson setup _build --prefix="$PREFIX" --libdir=lib --buildtype=release \
-         -Ddefault_library=shared -Db_ndebug=true "$@" \
+    && ${cross[@]+"${cross[@]}"} meson setup _build --prefix="$PREFIX" --libdir=lib --buildtype=release \
+         ${CROSS_ARGS:+$CROSS_ARGS} -Ddefault_library=shared -Db_ndebug=true "$@" \
     && ninja -C _build -j "$JOBS" install)
   mark_done "$name"
 }
+
+CROSS_ARGS=""
+[ "$CROSS" = 1 ] && CROSS_ARGS="--cross-file=$CROSS_FILE"
 
 log "python venv (meson, jinja2, aqtinstall)"
 if [ ! -x "$VENV/bin/meson" ]; then
@@ -111,7 +159,10 @@ if ! done_flag ffmpeg; then
     mkdir -p "$SRC/ffmpeg"
     curl -fsSL --retry 4 --retry-delay 15 --retry-all-errors "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz" | tar xJ -C "$SRC/ffmpeg" --strip-components 1
   fi
-  (cd "$SRC/ffmpeg" && ./configure --prefix="$PREFIX" --enable-shared --disable-static \
+  FF_CROSS=()
+  [ "$CROSS" = 1 ] && FF_CROSS=(--enable-cross-compile --arch=x86_64 --target-os=darwin --host-cc=clang
+    --cc="clang -arch x86_64" --cxx="clang++ -arch x86_64" --objcc="clang -arch x86_64")
+  (cd "$SRC/ffmpeg" && ./configure --prefix="$PREFIX" --enable-shared --disable-static ${FF_CROSS[@]+"${FF_CROSS[@]}"} \
       --disable-programs --disable-doc --disable-debug --disable-autodetect \
       --enable-videotoolbox --enable-audiotoolbox --enable-securetransport \
       --enable-zlib --enable-bzlib --enable-iconv --enable-libdav1d \
@@ -124,7 +175,7 @@ if ! done_flag sdl2; then
   log "SDL2 (game controllers)"
   fetch sdl2 https://github.com/libsdl-org/SDL.git "$SDL2_TAG"
   cmake -S "$SRC/sdl2" -B "$SRC/sdl2/_build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOS_MIN" \
+    -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOS_MIN" -DCMAKE_OSX_ARCHITECTURES=x86_64 \
     -DCMAKE_IGNORE_PREFIX_PATH="/usr/local;/opt/homebrew" \
     -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST=OFF -DSDL_X11=OFF
   cmake --build "$SRC/sdl2/_build" --target install
@@ -141,7 +192,9 @@ if ! done_flag mpv; then
     git -C "$SRC/mpv" apply --check "$p" 2>/dev/null && git -C "$SRC/mpv" apply "$p" && echo "applied $(basename "$p")"
   done
 fi
-meson_build mpv -Dlibmpv=true -Dcplayer=false -Dtests=false -Dfuzzers=false \
+MPV_SWIFT=()
+[ "$CROSS" = 1 ] && MPV_SWIFT=("-Dswift-flags=-target x86_64-apple-macos$MACOS_MIN")
+meson_build mpv ${MPV_SWIFT[@]+"${MPV_SWIFT[@]}"} -Dlibmpv=true -Dcplayer=false -Dtests=false -Dfuzzers=false \
   -Dlua=disabled -Djavascript=disabled -Dvapoursynth=disabled -Dvulkan=disabled -Dshaderc=disabled \
   -Dlibarchive=disabled -Duchardet=disabled -Drubberband=disabled -Dzimg=disabled -Dlibbluray=disabled \
   -Ddvdnav=disabled -Dcdda=disabled -Djpeg=disabled -Dsdl2-audio=disabled -Dsdl2-video=disabled \

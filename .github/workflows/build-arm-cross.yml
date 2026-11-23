@@ -1,0 +1,93 @@
+name: build-arm-cross
+
+# Experiment: cross-compile the x86_64 app on Apple Silicon runners, because macos-15-intel (the last
+# Intel image) is retired in 2027. Builds an artifact only - never publishes a release. The result is
+# compared with the DMG of the same tag built on the Intel runner.
+
+on:
+  push:
+    branches: [arm-cross-build]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Upstream tag to build (must have an Intel-runner release here for the comparison)"
+        required: false
+        default: v2.1.0-pre2
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-arm-cross-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-26]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    env:
+      JELLYFIN_TAG: ${{ inputs.tag || 'v2.1.0-pre2' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Runner
+        run: |
+          uname -m; sw_vers; xcodebuild -version; swiftc -version
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then echo "Rosetta: installed (not used by the build)"; else echo "Rosetta: not installed"; fi
+
+      - name: Build tools
+        run: brew install nasm ninja pkgconf || true
+
+      - name: Cache dependencies and Qt
+        uses: actions/cache@v4
+        with:
+          path: |
+            work/prefix
+            work/qt
+            work/venv
+          key: deps-arm-cross-${{ matrix.runner }}-${{ hashFiles('versions.env', 'build.sh', 'patches/mpv/**') }}
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Compare with the Intel-runner release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p ref
+          gh release download "$JELLYFIN_TAG" -R "$GITHUB_REPOSITORY" -p '*.dmg' -D ref
+          list() { # list <mounted volume>: relative path, archs and minos of every Mach-O file
+            local app; app=$(find "$1" -maxdepth 1 -name '*.app' | head -1)
+            (cd "$app" && find . -type f | sort | while read -r f; do
+              file -b "$f" | grep -q Mach-O || continue
+              printf '%s  %s  %s\n' "$f" "$(lipo -archs "$f")" "$(otool -l "$f" | awk '/LC_BUILD_VERSION/{b=1} b&&/minos/{print $2; exit}')"
+            done)
+          }
+          hdiutil attach -nobrowse -readonly -mountpoint /tmp/ref ref/*.dmg >/dev/null
+          hdiutil attach -nobrowse -readonly -mountpoint /tmp/new dist/*.dmg >/dev/null
+          list /tmp/ref > ref.txt; list /tmp/new > new.txt
+          echo "Mach-O files: intel runner $(wc -l < ref.txt), arm runner $(wc -l < new.txt)"
+          echo "DMG size: intel runner $(du -h ref/*.dmg | cut -f1), arm runner $(du -h dist/*.dmg | cut -f1)"
+          if diff -u ref.txt new.txt > compare.diff; then echo "identical file list, archs and minos"; else cat compare.diff; fi
+          {
+            echo "### ${{ matrix.runner }}: arm runner vs intel runner ($JELLYFIN_TAG)"
+            echo "Mach-O files: intel $(wc -l < ref.txt), arm $(wc -l < new.txt)"
+            echo '```diff'; cat compare.diff; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          hdiutil detach /tmp/ref >/dev/null; hdiutil detach /tmp/new >/dev/null
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arm-cross-${{ matrix.runner }}-${{ env.JELLYFIN_TAG }}
+          path: |
+            dist/*
+            compare.diff
+            ref.txt
+            new.txt
+          if-no-files-found: ignore
