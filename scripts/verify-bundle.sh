@@ -12,10 +12,12 @@ while IFS= read -r -d '' f; do
   file -b "$f" | grep -q 'Mach-O' || continue
   archs="$(lipo -archs "$f" 2>/dev/null || true)"
   case " $archs " in *" x86_64 "*) ;; *) echo "ARCH  $archs  $f"; fail=1 ;; esac
-  minos="$(otool -l "$f" | awk '/LC_BUILD_VERSION/{b=1} b&&/minos/{print $2; exit}')"
-  [ -z "$minos" ] && minos="$(otool -l "$f" | awk '/LC_VERSION_MIN_MACOSX/{b=1} b&&/ version/{print $2; exit}')"
+  # always read the x86_64 slice: on an Apple Silicon build machine otool shows the arm64 slice of universal files
+  minos="$(otool -arch x86_64 -l "$f" | awk '/LC_BUILD_VERSION/{b=1} b&&/minos/{print $2; exit}')"
+  [ -z "$minos" ] && minos="$(otool -arch x86_64 -l "$f" | awk '/LC_VERSION_MIN_MACOSX/{b=1} b&&/ version/{print $2; exit}')"
   if [ -n "$minos" ] && ver_gt "$minos" "$MIN"; then echo "MINOS $minos  $f"; fail=1; fi
-  otool -L "$f" | tail -n +2 | awk '{print $1}' | while read -r dep; do
+  # full path (it may contain spaces), without the "(compatibility version ...)" suffix; skip the "file:" header
+  otool -arch x86_64 -L "$f" | grep -v ':$' | sed -E 's/^[[:space:]]+//; s/ \(compatibility version.*$//' | while IFS= read -r dep; do
     case "$dep" in
       /System/*|/usr/lib/*|@executable_path/*|@loader_path/*) ;;
       @rpath/*) [ -e "$APP/Contents/Frameworks/${dep#@rpath/}" ] || { echo "MISSING $dep  <- $f"; exit 1; } ;;
