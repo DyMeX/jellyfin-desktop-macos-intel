@@ -95,7 +95,7 @@ jobs:
           . ./versions.env
           sha=$(cut -d' ' -f1 dist/*.sha256)
           cat > notes.md <<EOF
-          Unofficial Intel (x86_64) build of [Jellyfin Desktop ${tag}](https://github.com/jellyfin/jellyfin-desktop/releases/tag/${tag}), unchanged source.
+          Community Intel (x86_64) build of the official [Jellyfin Desktop ${tag}](https://github.com/jellyfin/jellyfin-desktop/releases/tag/${tag}) source, cloned from github.com/jellyfin/jellyfin-desktop at that tag and not modified. Not affiliated with the Jellyfin project.
 
           - Requires an Intel Mac with macOS ${MACOS_MIN} or newer.
           - Not notarized: on first launch right-click the app and choose **Open**, or run \`xattr -dr com.apple.quarantine "/Applications/Jellyfin Desktop.app"\`.

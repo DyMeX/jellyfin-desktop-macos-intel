@@ -1,6 +1,18 @@
 # Jellyfin Desktop for Intel Macs
 
-Unofficial x86_64 builds of [Jellyfin Desktop](https://github.com/jellyfin/jellyfin-desktop) for Intel Macs.
+Intel (x86_64) builds of the official [Jellyfin Desktop](https://github.com/jellyfin/jellyfin-desktop) source.
+This is a community build, not affiliated with or endorsed by the Jellyfin project.
+
+**Where the code comes from:**
+
+- The app source is cloned from the official repository `github.com/jellyfin/jellyfin-desktop` at the upstream
+  release tag and is not modified ([`build.sh`](build.sh)); the built-in update check is turned off with the
+  upstream CMake option `CHECK_FOR_UPDATES=OFF`.
+- Every release is built by [GitHub Actions](.github/workflows/build.yml) in this public repository, not on a
+  private machine. Each release note links to its build log and gives the SHA-256 of the DMG.
+- Dependencies come from their upstream projects at the versions pinned in [`versions.env`](versions.env)
+  (Qt as official binaries via aqtinstall, the rest built from source). The only patch is a small one for mpv
+  ([`patches/mpv`](patches/mpv)).
 
 Since 2.x the upstream project ships macOS builds for Apple Silicon only: Homebrew no longer has
 prebuilt mpv for Intel and building it there timed out the CI
